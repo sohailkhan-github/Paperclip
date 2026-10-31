@@ -1,3 +1,4 @@
+import { notifyNativeHarnessBackupExpiration } from "./native-harness-backup-expiration-notifications.js";
 import { notifyExternalObjectRefresh } from "./external-object-refresh-notifications.js";
 import { notifyMergeConfirmationWork } from "./merged-pr-confirmation-notifications.js";
 import { notifyRoutineExecutionStatus } from "./routine-execution-status-notifications.js";
@@ -11538,6 +11539,9 @@ export function issueService(db: Db) {
               (issueData.status === undefined &&
                 (blockedByIssueIds !== undefined || issueData.unblockDescriptor !== undefined)))) {
           patch.statusVersion = sql`${issues.statusVersion} + 1` as unknown as number;
+        }
+        if (patch.status !== undefined || patch.completedAt !== undefined || patch.cancelledAt !== undefined) {
+          await notifyNativeHarnessBackupExpiration(tx, { companyId: receiptExisting.companyId, issueId: id });
         }
         await notifyStatusCardIssueChange(tx, receiptExisting.companyId);
         if ((patch.status !== undefined && patch.status !== receiptExisting.status)
