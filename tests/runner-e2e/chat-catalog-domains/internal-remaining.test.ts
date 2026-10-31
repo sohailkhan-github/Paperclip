@@ -7,7 +7,7 @@ import { gradeArchivePartial } from "./internal-archive-partial.js";
 function base(scenarioId: string) { return { scenarioId, origin: "https://fixture.test", companyId: "company", leadId: "ceo", state: {} as Record<string, unknown>, tasks: [] as any[], projects: [] as any[], goals: [] as any[], comments: [] as any[], activity: [] as any[], documents: [], revisions: [], links: [] as string[], reply: "", humanQueries: [], runs: [] as any[] }; }
 it("preserves the exact active prerequisite while independently proving ready canonical and future agents", () => {
   const ready = { id: "ceo", lifecycleState: "ready", status: "idle", adapterConfig: { timeoutSec: 0 } };
-  const prepared = { lead: ready, future: { ...ready, id: "riley" }, held: { ...ready, id: "morgan", status: "running", adapterConfig: { timeoutSec: 420 } }, task: { id: "task", assigneeAgentId: "morgan", executionRunId: "held" }, runs: [{ id: "held", agentId: "morgan", status: "running" }], activeRunId: "held", gateCalls: [{ authorized: true }] };
+  const prepared = { lead: ready, future: { ...ready, id: "riley" }, held: { ...ready, id: "morgan", status: "running", adapterConfig: { timeoutSec: 0 } }, task: { id: "task", assigneeAgentId: "morgan", executionRunId: "held" }, runs: [{ id: "held", agentId: "morgan", status: "running" }], activeRunId: "held", gateCalls: [{ workerBound: true, workerId: "morgan" }] };
   expect(gradeProjectDefaultsSetup(prepared).passed).toBe(true);
   expect(gradeProjectDefaultsSetup({ ...prepared, lead: { ...prepared.lead, adapterConfig: { timeoutSec: 120 } } }).passed).toBe(false);
   expect(gradeProjectDefaultsSetup({ ...prepared, future: { ...prepared.future, adapterConfig: { timeoutSec: 120 } } }).passed).toBe(false);
@@ -15,6 +15,7 @@ it("preserves the exact active prerequisite while independently proving ready ca
   expect(gradeProjectDefaultsSetup({ ...prepared, future: { ...prepared.future, status: "error" } }).passed).toBe(false);
   expect(gradeProjectDefaultsSetup({ ...prepared, held: { ...prepared.held, adapterConfig: { timeoutSec: 120 } } }).passed).toBe(false);
   expect(gradeProjectDefaultsSetup({ ...prepared, gateCalls: [] }).passed).toBe(false);
+  expect(gradeProjectDefaultsSetup({ ...prepared, gateCalls: [{ workerBound: true, workerId: "unrelated" }] }).passed).toBe(false);
 });
 function defaults() {
   const o = base("projects.project-defaults"); const task = { id: "active", status: "in_progress", projectId: "p", assigneeAgentId: "morgan", executionRunId: "prior" }; const future = { id: "future", status: "done", projectId: "p" }; const p = { id: "p", description: "Keyboard navigation; adequate contrast; labeled controls", goalIds: ["growth"], env: null };
@@ -41,6 +42,26 @@ it("accepts consumed supported same-project API reads without requiring a partic
   expect(projectReadCalls([{ runId: "new", eventType: "item.completed", payload: { kind: "agentMessage", text: JSON.stringify(events) } }], "new", "p")).toEqual([]);
 });
 it("accepts a persisted checklist reference only when the new native context actually contains it", () => { const o = defaults(); Object.assign(o.state, { checklist: { id: "checklist", title: "Accessibility checklist" } }); o.projects[0].description = "Future work must follow Accessibility checklist."; o.futureContext.project.description = o.projects[0].description; expect(gradeProjectDefaults(o).passed).toBe(true); o.futureContext.project.description = ""; expect(gradeProjectDefaults(o).passed).toBe(false); });
+it("accepts a correlated dedicated project read only with the exact saved defaults", () => {
+  const o = defaults(); o.futureContext.project.description = "";
+  const description = o.projects[0].description;
+  const started = { runId: "new", eventType: "item.started", itemId: "read-p", payload: { kind: "dynamicToolCall", item: { type: "tool_use", id: "read-p", name: "list_projects", input: {} } } };
+  const completed = { runId: "new", eventType: "item.completed", itemId: "read-p", payload: { kind: "dynamicToolCall", item: { type: "tool_result", id: "read-p", tool_use_id: "read-p", is_error: false, result: { projects: [{ id: "p", description, descriptionTruncated: false }], nextCursor: null } } } };
+  const read = (events: unknown[]) => projectReadCalls(events, "new", "p", description);
+  expect(read([started, completed])).toEqual([{ runId: "new", projectId: "p", callId: "read-p" }]);
+  Object.assign(o, { futureProjectReads: read([started, completed]) }); expect(gradeProjectDefaults(o).passed).toBe(true);
+  for (const mutate of [
+    (row: typeof completed) => { row.runId = "foreign"; },
+    (row: typeof completed) => { row.itemId = "foreign"; },
+    (row: typeof completed) => { row.payload.item.tool_use_id = "foreign"; },
+    (row: typeof completed) => { row.payload.item.is_error = true; },
+    (row: typeof completed) => { row.payload.item.result.projects[0]!.id = "foreign"; },
+    (row: typeof completed) => { row.payload.item.result.projects[0]!.description = "stale defaults"; },
+    (row: typeof completed) => { row.payload.item.result.projects[0]!.descriptionTruncated = true; },
+  ]) { const wrong = structuredClone(completed); mutate(wrong); expect(read([started, wrong])).toEqual([]); }
+  expect(read([completed])).toEqual([]);
+  expect(projectReadCalls([started, completed], "new", "p")).toEqual([]);
+});
 function routine() { const o = base("activity.routine-audit"); const r = { id: "routine", companyId: "company", title: "Daily launch", description: "Launch audit", updatedAt: "2026-10-25T14:00:00Z" }; o.state.routine = structuredClone(r); o.activity = [{ id: "edit", entityId: r.id, action: "routine.updated", createdAt: r.updatedAt, actorType: "user" }]; o.links = ["/RUN/routines/routine"]; o.reply = "The definition was edited yesterday; there is no successful execution this morning and no resulting work. The enabled schedule alone is not proof of a run."; return { ...o, routine: r, routineRuns: [] as any[], routineRevisions: [{ id: "rev" }], now: "2026-10-26T15:00:00Z", timezone: "UTC" }; }
 it("accepts real prior-day definition history with absent morning execution", () => expect(gradeRoutineAudit(routine()).passed).toBe(true));
 it("accepts a natural evidence-grounded missing-run explanation", () => { const o = routine(); o.reply = "Yesterday's schedule edit is saved, but I found no completed task or successful execution this morning."; expect(gradeRoutineAudit(o).passed).toBe(true); });
