@@ -22,3 +22,10 @@ attention task index. Screenshots and failure traces stay in `test-results`.
 Request counts and row budgets are acceptance checks. They do not establish an
 end-to-end latency improvement. Measure cold, warm, and Back timings separately
 with the same fixture, assets, cache, viewport, and CPU/network settings.
+
+Startup cases also check that shared collection controls do not require the
+task-detail bundle before reveal, even when a different organization is remembered.
+Code warms after the collection paints, or on task-link intent. A failed speculative fetch leaves the
+collection usable and permits navigation without a document reload. Direct task
+URLs retain module preload while identity is pending. These cases must run with
+production assets: development modules do not exercise the bundle boundaries.
