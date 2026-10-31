@@ -1,3 +1,4 @@
+import { notifyExternalObjectRefresh } from "./external-object-refresh-notifications.js";
 import { notifyMergeConfirmationWork } from "./merged-pr-confirmation-notifications.js";
 import { notifyRoutineExecutionStatus } from "./routine-execution-status-notifications.js";
 import { notifyIssueAttentionRetentionWork } from "./retention-work-notifications.js";
@@ -96,6 +97,7 @@ import {
   heartbeatRuns,
   routineRuns,
   executionWorkspaces,
+  externalObjectMentions,
   issueApprovals,
   issueAccessGrants,
   issueAttachments,
@@ -12022,6 +12024,14 @@ export function issueService(db: Db) {
           if (owner) {
             await notifyIssueAttentionRetentionWork(tx, { companyId: owner.companyId, issueId: id });
             await notifyExternalConversationSettlement(tx, { companyId: owner.companyId });
+            const mentionedObjects = await tx.selectDistinct({ objectId: externalObjectMentions.objectId })
+              .from(externalObjectMentions)
+              .where(and(
+                eq(externalObjectMentions.companyId, owner.companyId),
+                eq(externalObjectMentions.sourceIssueId, id),
+                isNotNull(externalObjectMentions.objectId),
+              ));
+            for (const mention of mentionedObjects) await notifyExternalObjectRefresh(tx, owner.companyId, mention.objectId!);
             await notifyApprovalWork(tx, owner.companyId);
             await notifyStatusCardIssueChange(tx, owner.companyId);
           }
